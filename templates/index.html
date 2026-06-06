@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Our Private Heaven</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div id="heartBgContainer"></div>
+
+<div id="loginScreen">
+    <div class="loginBox">
+        <div class="heart-lock">💝</div>
+        <h2>Our Private Space</h2>
+        <input type="text" id="usernameInput" placeholder="Enter Name" required>
+        <input type="password" id="passcode" placeholder="Enter Passcode">
+        <button onclick="joinChat()">Enter Our World</button>
+    </div>
+</div>
+
+<div id="chatScreen">
+    <div id="header">
+        <div class="header-side">
+            <div id="onlineUsers">Online: 0</div>
+        </div>
+        <div class="header-center">
+            <h1 class="cute-title">Soulmate</h1>
+        </div>
+        <div class="header-side text-right">
+            <button id="multiSelectToggleBtn" onclick="toggleMultiSelectMode()" title="Select Multiple">🗑️</button>
+            <button id="darkModeBtn">🌙</button>
+        </div>
+    </div>
+
+    <div id="multiSelectBar" class="hidden-bar">
+        <span id="selectCountLabel">0 selected</span>
+        <div class="multi-select-buttons">
+            <button class="action-unsend-btn" onclick="unsendSelectedMessages()">Unsend Selected ❌</button>
+            <button class="action-cancel-btn" onclick="disableMultiSelectMode()">Cancel</button>
+        </div>
+    </div>
+
+    <div id="messages"></div>
+    <div id="typingIndicator"></div>
+
+    <div id="inputDock">
+        <div id="replyPreviewBar" class="hidden-reply-bar">
+            <div class="reply-bar-content">
+                <span class="reply-indicator-arrow">↩️ Replying to <strong id="replyTargetUser">User</strong></span>
+                <div id="replyTargetText">Message summary...</div>
+            </div>
+            <button class="close-reply-btn" onclick="cancelReplyTracking()">✕</button>
+        </div>
+
+        <div id="mediaDrawer">
+            <div class="drawer-header-label">✨ Sweet Stickers</div>
+            <div class="sticker-panel-view" id="dynamicStickerContainer">
+                <span onclick="sendSticker('✨💝 Super Love 💝✨')">💝 Super Love</span>
+                <span onclick="sendSticker('🌹 A Rose For My Favorite Person 🌹')">🌹 Rose Gift</span>
+                <span onclick="sendSticker('⊂(´• ω •\`)⊃ Warmest Hugs For You!')">🤗 Warm Hug</span>
+                <span onclick="sendSticker('✨ My Whole World Map Resolves To You ✨')">🌍 My World</span>
+                <span onclick="sendSticker('I Miss You So Much Already 🥺❤️')">🥺 Miss You</span>
+                <span onclick="sendSticker('Forever & Always, No Matter What ♾️')">♾️ Forever</span>
+                <span onclick="sendSticker('You Make My Heart Happy 🥰 Real Happy.')">💖 Heart Happy</span>
+            </div>
+
+            <div class="media-actions-dock">
+                <button onclick="document.getElementById('fileUploader').click()">🖼️ Upload Image / GIF</button>
+                <input type="file" id="fileUploader" accept="image/*" onchange="handleLocalImageUpload(event)" style="display: none;">
+            </div>
+        </div>
+
+        <div id="bottomBar">
+            <button id="mediaToggleBtn" onclick="toggleMediaDrawer()">➕</button>
+            <input id="messageInput" placeholder="Write something sweet...">
+            <button id="sendBtn">Send</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
