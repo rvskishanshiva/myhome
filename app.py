@@ -3,31 +3,51 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, session
 from flask_socketio import SocketIO, emit
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+# Find path directory to safely locate config files on production servers
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__)
-# Uses environment variable for secret key, falls back to a default if not found
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'heaven_secret_token_2026')
 
-# 50 MB payload handling limit configuration matching your design
-socketio = SocketIO(app, max_http_buffer_size=50000000, cors_allowed_origins="*")
+# CRITICAL FOR RENDER: Configured engine settings to handle proxy WebSockets smoothly
+socketio = SocketIO(
+    app, 
+    max_http_buffer_size=50000000, 
+    cors_allowed_origins="*",
+    async_mode='gevent', # Works seamlessly with gunicorn on Render
+    logger=True,
+    engineio_logger=True
+)
 
-# Read configurations safely
-with open("config.json", "r") as f:
-    config = json.load(f)
+# Read configurations safely using absolute directory paths
+try:
+    config_path = os.path.join(BASE_DIR, "config.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
+    CHAT_PASSCODE = config.get("chatPasscode")
+except Exception:
+    CHAT_PASSCODE = os.environ.get("CHAT_PASSCODE", "default_fallback_passcode")
 
-CHAT_PASSCODE = config.get("chatPasscode")
 ALLOWED_USERS = ["Sunshine", "Angel"]
 online_users = 0
 
-# Database Helper Function updated for Render Environment Variables
 def get_db_connection():
-    return mysql.connector.connect(
+    db_url = os.environ.get('DATABASE_URL')
+    if db_url:
+        # Render provides 'postgres://', but Python's psycopg2 requires 'postgresql://'
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        return psycopg2.connect(db_url)
+    
+    return psycopg2.connect(
         host=os.environ.get('DB_HOST', 'localhost'),
-        user=os.environ.get('DB_USER', 'chat_user'),
+        user=os.environ.get('DB_USER', 'postgres'),
         password=os.environ.get('DB_PASSWORD', 'Shiva@280501#'),
-        database=os.environ.get('DB_NAME', 'chat_db'),
-        port=int(os.environ.get('DB_PORT', 3306))
+        database=os.environ.get('DB_NAME', 'postgres'),
+        port=int(os.environ.get('DB_PORT', 5432))
     )
 
 def init_db():
@@ -36,22 +56,21 @@ def init_db():
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 sender_name VARCHAR(255),
-                text LONGTEXT,
+                text TEXT,
                 created_at VARCHAR(255),
                 parent_id INT DEFAULT NULL,
-                reactions LONGTEXT
+                reactions TEXT
             )
         """)
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ Database connection and table verified.")
+        print("✅ PostgreSQL connection and table verified.")
     except Exception as e:
         print(f"❌ Database initialization warning: {e}")
 
-# Initialize Database Connection
 init_db()
 
 @app.route('/')
@@ -88,7 +107,7 @@ def handle_check_passcode(data):
 
         try:
             conn = get_db_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute("SELECT * FROM messages ORDER BY id ASC")
             rows = cursor.fetchall()
             
@@ -96,9 +115,9 @@ def handle_check_passcode(data):
             for row in rows:
                 msg_payload = {
                     'id': int(row['id']),
-                    'sender_name': str(row['sender_name'] or ''),
-                    'text': str(row['text'] or ''),
-                    'created_at': str(row['created_at'] or ''),
+                    'sender_name': str(row['sender_name'] if row.get('sender_name') is not None else ''),
+                    'text': str(row['text'] if row.get('text') is not None else ''),
+                    'created_at': str(row['created_at'] if row.get('created_at') is not None else ''),
                     'parent_id': int(row['parent_id']) if row.get('parent_id') is not None else None,
                     'reactions': {}
                 }
@@ -112,6 +131,9 @@ def handle_check_passcode(data):
                                 msg_payload['reactions'] = json.loads(stripped)
                             except Exception:
                                 msg_payload['reactions'] = {}
+                    elif isinstance(rx_data, dict):
+                        msg_payload['reactions'] = rx_data
+                        
                 cleaned_messages.append(msg_payload)
             
             emit('load-messages', cleaned_messages)
@@ -139,10 +161,13 @@ def handle_chat_message(data):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        stmt = "INSERT INTO messages (sender_name, text, created_at, parent_id, reactions) VALUES (%s, %s, %s, %s, %s)"
+        stmt = """
+            INSERT INTO messages (sender_name, text, created_at, parent_id, reactions) 
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """
         cursor.execute(stmt, (session.get('username'), message_text, now, parent_id, '{}'))
+        last_id = cursor.fetchone()[0]
         conn.commit()
-        last_id = cursor.lastrowid
         cursor.close()
         conn.close()
 
@@ -170,7 +195,7 @@ def handle_toggle_reaction(data):
 
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT reactions FROM messages WHERE id = %s", (message_id,))
         row = cursor.fetchone()
         
@@ -219,7 +244,7 @@ def handle_edit_message(data):
         return
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT sender_name FROM messages WHERE id = %s", (data.get('id'),))
         row = cursor.fetchone()
         
@@ -244,11 +269,12 @@ def handle_delete_messages(ids):
 
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         format_strings = ','.join(['%s'] * len(clean_ids))
         query = f"SELECT id FROM messages WHERE id IN ({format_strings}) AND sender_name = %s"
         
-        cursor.execute(query, clean_ids + [session.get('username')])
+        params = clean_ids + [session.get('username')]
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         verified_ids = [int(row['id']) for row in rows]
 
@@ -264,6 +290,5 @@ def handle_delete_messages(ids):
         print(f"❌ Message Delete Error: {err}")
 
 if __name__ == '__main__':
-    # Dynamic port configuration for Render production deployment
     port = int(os.environ.get('PORT', 5000))
     socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
